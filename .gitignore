@@ -427,3 +427,9 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Agent tooling metadata (generated per-user, not product code)
+.atl/
+.pi/
+.engram/engram.db
+.engram/cloud.json
