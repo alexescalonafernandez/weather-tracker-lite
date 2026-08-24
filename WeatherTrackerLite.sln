@@ -1,0 +1,25 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WeatherTrackerLite.Web", "src\WeatherTrackerLite.Web\WeatherTrackerLite.Web.csproj", "{5F3A6D6C-CC40-4F03-98CB-88AEBB104CD5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WeatherTrackerLite.Web.Tests", "tests\WeatherTrackerLite.Web.Tests\WeatherTrackerLite.Web.Tests.csproj", "{D4AD1C32-53A6-46B0-A1A9-29DC6A75E722}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5F3A6D6C-CC40-4F03-98CB-88AEBB104CD5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5F3A6D6C-CC40-4F03-98CB-88AEBB104CD5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5F3A6D6C-CC40-4F03-98CB-88AEBB104CD5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5F3A6D6C-CC40-4F03-98CB-88AEBB104CD5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D4AD1C32-53A6-46B0-A1A9-29DC6A75E722}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D4AD1C32-53A6-46B0-A1A9-29DC6A75E722}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D4AD1C32-53A6-46B0-A1A9-29DC6A75E722}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D4AD1C32-53A6-46B0-A1A9-29DC6A75E722}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
