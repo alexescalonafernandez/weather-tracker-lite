@@ -1,0 +1,79 @@
+@page
+@model WeatherTrackerLite.Web.Pages.IndexModel
+@{
+    ViewData["Title"] = "Weather Tracker Lite";
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"]</title>
+</head>
+<body>
+    <main>
+        <h1>Weather Tracker Lite</h1>
+        <form method="post">
+            <div>
+                <label asp-for="City">City</label>
+                <input asp-for="City" autocomplete="address-level2" />
+            </div>
+            <button type="submit">Get weather</button>
+        </form>
+
+        @if (Model.OutcomeMessage is not null)
+        {
+            <section aria-live="polite" role="status">
+                <p>@Model.OutcomeMessage</p>
+            </section>
+        }
+
+        @if (Model.Result is not null)
+        {
+            <section aria-labelledby="weather-heading">
+                <h2 id="weather-heading">Weather for @Model.Result.Location.City</h2>
+                <p>@Model.Result.Location.CountryOrRegion</p>
+                <p>Local observation time: <time datetime="@Model.Result.CurrentConditions.ObservedAtLocal.ToString("O")">@Model.Result.CurrentConditions.ObservedAtLocal.ToString("f")</time></p>
+
+                <h3>Current conditions</h3>
+                <dl>
+                    <dt>Temperature</dt>
+                    <dd>@Model.Result.CurrentConditions.TemperatureCelsius°C</dd>
+                    <dt>Apparent temperature</dt>
+                    <dd>@Model.Result.CurrentConditions.ApparentTemperatureCelsius°C</dd>
+                    <dt>Condition</dt>
+                    <dd>@Model.Result.CurrentConditions.Condition</dd>
+                    <dt>Wind speed</dt>
+                    <dd>@Model.Result.CurrentConditions.WindSpeedKilometresPerHour km/h</dd>
+                </dl>
+
+                <h3>Three-day forecast</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th scope="col">Date</th>
+                            <th scope="col">Minimum</th>
+                            <th scope="col">Maximum</th>
+                            <th scope="col">Precipitation probability</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var day in Model.Result.Forecast.Days)
+                        {
+                            <tr>
+                                <th scope="row"><time datetime="@day.Date.ToString("yyyy-MM-dd")">@day.Date.ToString("D")</time></th>
+                                <td>@day.MinimumTemperatureCelsius°C</td>
+                                <td>@day.MaximumTemperatureCelsius°C</td>
+                                <td>@day.PrecipitationProbabilityPercent%</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+                <p>@Model.Result.Attribution</p>
+            </section>
+        }
+    </main>
+</body>
+</html>

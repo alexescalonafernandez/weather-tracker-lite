@@ -15,9 +15,12 @@ builder.Services.AddHttpClient<IWeatherProvider, OpenMeteoWeatherProvider>((serv
     var options = serviceProvider.GetRequiredService<IOptions<OpenMeteoOptions>>().Value;
     client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
 });
+builder.Services.AddScoped<GetWeatherForCity>();
+builder.Services.AddRazorPages();
 
 var app = builder.Build();
 
+app.MapRazorPages();
 app.Run();
 
 public partial class Program;
