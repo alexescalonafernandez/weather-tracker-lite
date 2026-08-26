@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -8,7 +9,10 @@ using WeatherTrackerLite.Web.Features.Weather.Domain;
 
 namespace WeatherTrackerLite.Web.Features.Weather.Infrastructure;
 
-public sealed class OpenMeteoWeatherProvider(HttpClient httpClient, IOptions<OpenMeteoOptions> options) : IWeatherProvider
+public sealed class OpenMeteoWeatherProvider(
+    HttpClient httpClient,
+    IOptions<OpenMeteoOptions> options,
+    ILogger<OpenMeteoWeatherProvider> logger) : IWeatherProvider
 {
     private const string Attribution = "Weather data by Open-Meteo.com (CC BY 4.0).";
     private readonly OpenMeteoOptions options = options.Value;
@@ -17,7 +21,7 @@ public sealed class OpenMeteoWeatherProvider(HttpClient httpClient, IOptions<Ope
     {
         try
         {
-            var geocodingResponse = await SendAsync<GeocodingResponse>(BuildGeocodingUri(city), cancellationToken);
+            var geocodingResponse = await SendAsync<GeocodingResponse>(BuildGeocodingUri(city), "geocoding", cancellationToken);
             if (geocodingResponse is null)
             {
                 return new WeatherQueryOutcome.ProviderUnavailable();
@@ -29,7 +33,7 @@ public sealed class OpenMeteoWeatherProvider(HttpClient httpClient, IOptions<Ope
                 return new WeatherQueryOutcome.NotFound();
             }
 
-            var forecastResponse = await SendAsync<ForecastResponse>(BuildForecastUri(location), cancellationToken);
+            var forecastResponse = await SendAsync<ForecastResponse>(BuildForecastUri(location), "forecast", cancellationToken);
             if (forecastResponse is null)
             {
                 return new WeatherQueryOutcome.ProviderUnavailable();
@@ -53,15 +57,53 @@ public sealed class OpenMeteoWeatherProvider(HttpClient httpClient, IOptions<Ope
         }
     }
 
-    private async Task<T?> SendAsync<T>(Uri requestUri, CancellationToken cancellationToken)
+    private async Task<T?> SendAsync<T>(Uri requestUri, string operation, CancellationToken cancellationToken)
     {
-        using var response = await httpClient.GetAsync(requestUri, cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            return default;
-        }
+        var stopwatch = Stopwatch.StartNew();
+        HttpResponseMessage? response = null;
 
-        return await response.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken);
+        try
+        {
+            response = await httpClient.GetAsync(requestUri, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                LogDependencyOutcome(operation, "HttpFailure", response.StatusCode, stopwatch.Elapsed.TotalMilliseconds);
+                return default;
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken);
+            LogDependencyOutcome(operation, "Success", response.StatusCode, stopwatch.Elapsed.TotalMilliseconds);
+            return payload;
+        }
+        catch (HttpRequestException)
+        {
+            LogDependencyOutcome(operation, "TransportFailure", response?.StatusCode, stopwatch.Elapsed.TotalMilliseconds);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            LogDependencyOutcome(operation, "TimedOut", response?.StatusCode, stopwatch.Elapsed.TotalMilliseconds);
+            throw;
+        }
+        catch (JsonException)
+        {
+            LogDependencyOutcome(operation, "InvalidPayload", response?.StatusCode, stopwatch.Elapsed.TotalMilliseconds);
+            throw;
+        }
+        finally
+        {
+            response?.Dispose();
+        }
+    }
+
+    private void LogDependencyOutcome(string operation, string outcome, System.Net.HttpStatusCode? statusCode, double durationMilliseconds)
+    {
+        logger.LogInformation(
+            "Open-Meteo dependency call completed with outcome {DependencyOutcome} for operation {ProviderOperation}, status code {StatusCode}, duration {DurationMs}ms",
+            outcome,
+            operation,
+            statusCode is null ? null : (int)statusCode,
+            durationMilliseconds);
     }
 
     private Uri BuildGeocodingUri(string city) => new(

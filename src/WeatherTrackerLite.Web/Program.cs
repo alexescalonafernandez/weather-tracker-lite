@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using WeatherTrackerLite.Web.Features.Weather.Application;
 using WeatherTrackerLite.Web.Features.Weather.Infrastructure;
@@ -17,10 +18,14 @@ builder.Services.AddHttpClient<IWeatherProvider, OpenMeteoWeatherProvider>((serv
 });
 builder.Services.AddScoped<GetWeatherForCity>();
 builder.Services.AddRazorPages();
+builder.Services.AddHealthChecks()
+    .AddCheck<OpenMeteoConfigurationHealthCheck>("openmeteo_configuration", tags: ["ready"]);
 
 var app = builder.Build();
 
 app.MapRazorPages();
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = healthCheck => healthCheck.Tags.Contains("ready") });
 app.Run();
 
 public partial class Program;

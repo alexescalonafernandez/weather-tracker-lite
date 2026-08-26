@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
 using WeatherTrackerLite.Web.Features.Weather.Domain;
 using WeatherTrackerLite.Web.Features.Weather.Infrastructure;
 using Xunit;
@@ -120,7 +121,8 @@ public sealed class OpenMeteoWeatherProviderTests
             GeocodingBaseUrl = "https://geocoding-api.open-meteo.com/",
             ForecastBaseUrl = "https://api.open-meteo.com/",
             TimeoutSeconds = 10
-        }));
+        }),
+        NullLogger<OpenMeteoWeatherProvider>.Instance);
 
     private static HttpResponseMessage JsonResponse(string content) => new(HttpStatusCode.OK)
     {

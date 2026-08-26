@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WeatherTrackerLite.Web.Features.Weather.Application;
 using WeatherTrackerLite.Web.Features.Weather.Domain;
 using Xunit;
@@ -11,7 +13,7 @@ public sealed class GetWeatherForCityTests
     {
         var expectedResult = CreateWeatherQueryResult();
         var provider = new FakeWeatherProvider(new WeatherQueryOutcome.Success(expectedResult));
-        var workflow = new GetWeatherForCity(provider);
+        var workflow = CreateWorkflow(provider);
 
         var outcome = await workflow.ExecuteAsync("  Wellington  ");
 
@@ -28,7 +30,7 @@ public sealed class GetWeatherForCityTests
     public async Task ExecuteAsync_returns_invalid_request_without_calling_provider_for_invalid_city(string? city)
     {
         var provider = new FakeWeatherProvider(new WeatherQueryOutcome.NotFound());
-        var workflow = new GetWeatherForCity(provider);
+        var workflow = CreateWorkflow(provider);
 
         var outcome = await workflow.ExecuteAsync(city);
 
@@ -45,7 +47,7 @@ public sealed class GetWeatherForCityTests
     {
         var providerOutcome = CreateFailureOutcome(outcomeType);
         var provider = new FakeWeatherProvider(providerOutcome);
-        var workflow = new GetWeatherForCity(provider);
+        var workflow = CreateWorkflow(provider);
 
         var outcome = await workflow.ExecuteAsync("Lisbon");
 
@@ -53,11 +55,29 @@ public sealed class GetWeatherForCityTests
         Assert.Equal("Lisbon", provider.ReceivedCity);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_logs_the_outcome_classification_without_the_city()
+    {
+        var logger = new CapturingLogger<GetWeatherForCity>();
+        var workflow = new GetWeatherForCity(new FakeWeatherProvider(new WeatherQueryOutcome.NotFound()), logger);
+
+        await workflow.ExecuteAsync("Wellington");
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Information, entry.Level);
+        Assert.Equal("Weather query completed with outcome classification {OutcomeClassification}", entry.Template);
+        Assert.Equal("NotFound", entry.Properties["OutcomeClassification"]);
+        Assert.DoesNotContain("Wellington", entry.Properties.Values.OfType<string>());
+    }
+
     private static WeatherQueryOutcome CreateFailureOutcome(Type outcomeType) =>
         outcomeType == typeof(WeatherQueryOutcome.NotFound) ? new WeatherQueryOutcome.NotFound() :
         outcomeType == typeof(WeatherQueryOutcome.ProviderUnavailable) ? new WeatherQueryOutcome.ProviderUnavailable() :
         outcomeType == typeof(WeatherQueryOutcome.TimedOut) ? new WeatherQueryOutcome.TimedOut() :
         new WeatherQueryOutcome.InvalidProviderData();
+
+    private static GetWeatherForCity CreateWorkflow(IWeatherProvider provider) =>
+        new(provider, NullLogger<GetWeatherForCity>.Instance);
 
     private static WeatherQueryResult CreateWeatherQueryResult() => new(
         new ResolvedLocation("Wellington", "New Zealand", -41.2865m, 174.7762m, "Pacific/Auckland"),
@@ -85,4 +105,31 @@ public sealed class GetWeatherForCityTests
             return Task.FromResult(outcome);
         }
     }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<LogEntry> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (state is not IReadOnlyList<KeyValuePair<string, object?>> structuredState)
+            {
+                throw new InvalidOperationException("Structured log state was expected.");
+            }
+
+            var properties = structuredState
+                .Where(property => property.Key != "{OriginalFormat}")
+                .ToDictionary(property => property.Key, property => property.Value);
+            var template = structuredState
+                .Single(property => property.Key == "{OriginalFormat}").Value?.ToString();
+
+            Entries.Add(new LogEntry(logLevel, template, properties));
+        }
+    }
+
+    private sealed record LogEntry(LogLevel Level, string? Template, IReadOnlyDictionary<string, object?> Properties);
 }

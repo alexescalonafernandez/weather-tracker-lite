@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using WeatherTrackerLite.Web.Features.Weather.Application;
 using WeatherTrackerLite.Web.Features.Weather.Domain;
 using WeatherTrackerLite.Web.Pages;
@@ -12,7 +13,7 @@ public sealed class IndexModelTests
     {
         var expectedResult = CreateWeatherQueryResult();
         var provider = new FakeWeatherProvider(new WeatherQueryOutcome.Success(expectedResult));
-        var model = new IndexModel(new GetWeatherForCity(provider)) { City = "  Wellington  " };
+        var model = new IndexModel(CreateWorkflow(provider)) { City = "  Wellington  " };
 
         await model.OnPostAsync(CancellationToken.None);
 
@@ -32,7 +33,7 @@ public sealed class IndexModelTests
     [InlineData(typeof(WeatherQueryOutcome.InvalidRequest), "Enter a city to see its weather.")]
     public async Task OnPostAsync_renders_safe_actionable_message_for_each_failure_outcome(Type outcomeType, string expectedMessage)
     {
-        var model = new IndexModel(new GetWeatherForCity(new FakeWeatherProvider(CreateOutcome(outcomeType)))) { City = "Wellington" };
+        var model = new IndexModel(CreateWorkflow(new FakeWeatherProvider(CreateOutcome(outcomeType)))) { City = "Wellington" };
 
         await model.OnPostAsync(CancellationToken.None);
 
@@ -44,7 +45,7 @@ public sealed class IndexModelTests
     [Fact]
     public async Task OnPostAsync_hides_unexpected_exception_details()
     {
-        var model = new IndexModel(new GetWeatherForCity(new ThrowingWeatherProvider())) { City = "Wellington" };
+        var model = new IndexModel(CreateWorkflow(new ThrowingWeatherProvider())) { City = "Wellington" };
 
         await model.OnPostAsync(CancellationToken.None);
 
@@ -58,6 +59,9 @@ public sealed class IndexModelTests
         outcomeType == typeof(WeatherQueryOutcome.TimedOut) ? new WeatherQueryOutcome.TimedOut() :
         outcomeType == typeof(WeatherQueryOutcome.InvalidProviderData) ? new WeatherQueryOutcome.InvalidProviderData() :
         new WeatherQueryOutcome.InvalidRequest();
+
+    private static GetWeatherForCity CreateWorkflow(IWeatherProvider provider) =>
+        new(provider, NullLogger<GetWeatherForCity>.Instance);
 
     private static WeatherQueryResult CreateWeatherQueryResult() => new(
         new ResolvedLocation("Wellington", "New Zealand", -41.2865m, 174.7762m, "Pacific/Auckland"),
