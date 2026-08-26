@@ -34,18 +34,23 @@ az provider show --namespace Microsoft.OperationalInsights
 az provider show --namespace Microsoft.Consumption
 az provider show --namespace Microsoft.ManagedIdentity
 
-# Compile and validate the future Bicep entry point and approved parameters.
-az bicep build --file <main-bicep-file>
-az deployment sub validate --location westeurope --template-file <main-bicep-file> --parameters <mvp-parameters-file>
+# Compile both stage entry points and their parameter files.
+az bicep build --file infra/main.bicep
+az bicep build --file infra/workload.bicep
+az bicep build-params --file infra/parameters/mvp.example.bicepparam
+az bicep build-params --file infra/parameters/workload.example.bicepparam
 
-# Review the planned changes without applying them.
-az deployment sub what-if --location westeurope --template-file <main-bicep-file> --parameters <mvp-parameters-file>
+# After supplying the external values, validate and review each stage at its scope.
+az deployment sub validate --location westeurope --template-file infra/main.bicep --parameters infra/parameters/mvp.example.bicepparam budgetNotificationEmail=<approved-recipient>
+az deployment sub what-if --location westeurope --template-file infra/main.bicep --parameters infra/parameters/mvp.example.bicepparam budgetNotificationEmail=<approved-recipient>
+az deployment group validate --resource-group <resource-group-name> --template-file infra/workload.bicep --parameters infra/parameters/workload.example.bicepparam imageReference=<repository>@sha256:<digest>
+az deployment group what-if --resource-group <resource-group-name> --template-file infra/workload.bicep --parameters infra/parameters/workload.example.bicepparam imageReference=<repository>@sha256:<digest>
 
 # Build the application image locally without publishing it.
 docker build --tag <local-image-name>:<immutable-tag> .
 ```
 
-The exact validation command and scope may differ when the final Bicep entry point deploys at resource-group rather than subscription scope. Use the command that matches the implementation. A successful compile or what-if does not replace checking provider registration, regional availability, SKU availability, and policy constraints.
+`main.bicep` is the subscription-scope foundation entry point. `workload.bicep` is the resource-group-scope workload entry point. A successful compile or what-if does not replace checking provider registration, regional availability, SKU availability, and policy constraints.
 
 Stop if validation reveals unavailable features, prohibited policy, unexpected resources, a floating image tag, any credential-based ACR design, or a discrepancy from the approved resource inventory.
 
@@ -56,11 +61,10 @@ Execute this sequence only after preflight approval. Values shown in angle brack
 1. **Create the dedicated resource group and supporting infrastructure.**
 
    ```bash
-   az group create --name <resource-group-name> --location westeurope
-   az deployment group create --resource-group <resource-group-name> --template-file <foundation-bicep-file> --parameters <mvp-parameters-file>
+   az deployment sub create --location westeurope --template-file infra/main.bicep --parameters infra/parameters/mvp.example.bicepparam budgetNotificationEmail=<approved-recipient>
    ```
 
-   The foundation must create the Log Analytics workspace, Consumption Container Apps Environment, Basic ACR, user-assigned managed identity, and the registry-scoped `AcrPull` assignment. Confirm the ACR admin user remains disabled.
+   This foundation stage creates the resource group, Log Analytics workspace, Consumption Container Apps Environment, Basic ACR, user-assigned managed identity, registry-scoped `AcrPull` assignment, and USD 10 budget. It deliberately does not create a Container App. Confirm the ACR admin user remains disabled.
 
 2. **Build and publish an immutable image to the private registry.**
 
@@ -76,10 +80,10 @@ Execute this sequence only after preflight approval. Values shown in angle brack
 3. **Deploy or update the Container App revision.**
 
    ```bash
-   az deployment group create --resource-group <resource-group-name> --template-file <container-app-bicep-file> --parameters <mvp-parameters-file> imageReference=<acr-login-server>/<repository>:<immutable-tag>
+   az deployment group create --resource-group <resource-group-name> --template-file infra/workload.bicep --parameters infra/parameters/workload.example.bicepparam imageReference=<repository>@sha256:<digest>
    ```
 
-   The deployment must configure external ingress on port `8080`, attach the user-assigned identity as the ACR registry identity, set `minReplicas: 0` and `maxReplicas: 1`, and map startup/liveness to `/health/live` and readiness to `/health/ready`.
+   Obtain `<repository>@sha256:<digest>` from the published image before this stage; do not use a tag. The deployment must configure external ingress on port `8080`, attach the user-assigned identity as the ACR registry identity, set `minReplicas: 0` and `maxReplicas: 1`, and map startup/liveness to `/health/live` and readiness to `/health/ready`.
 
 4. **Capture the generated public endpoint and deployed revision.**
 
@@ -133,15 +137,10 @@ Keep log retention intentional and periodically review volume. Log Analytics is 
 
 ## Cost and budget controls
 
-1. Create a monthly cost budget of **USD 10** for the dedicated MVP resource group, using the approved deployment mechanism.
-2. Configure notification thresholds and an externally supplied alert destination.
+1. The foundation deployment creates a monthly **USD 10** budget for the dedicated MVP resource group.
+2. Supply the approved alert destination outside source control as `budgetNotificationEmail`.
 3. Verify the budget is visible in Azure Cost Management and record its scope and thresholds.
 4. Review costs after the first deployment and regularly thereafter, including Log Analytics ingestion/retention and ACR storage.
-
-```bash
-# Placeholder: deploy the budget module at the appropriate billing scope.
-az deployment <scope> create --template-file <budget-bicep-file> --parameters budgetAmount=10 <budget-scope-parameters>
-```
 
 Budget alerts warn; they do **not** stop, scale down, or delete resources. The operational response to an alert is to review usage and, if the environment is no longer needed, use the teardown procedure below.
 

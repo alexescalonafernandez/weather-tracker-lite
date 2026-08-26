@@ -433,3 +433,6 @@ FodyWeavers.xsd
 .pi/
 .engram/engram.db
 .engram/cloud.json
+
+# Generated Bicep templates (source files remain under infra/)
+/infra/*.json
