@@ -1,0 +1,6 @@
+.git/
+.atl/
+**/bin/
+**/obj/
+tests/
+docs/
