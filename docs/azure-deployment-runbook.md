@@ -88,7 +88,7 @@ Execute this sequence only after preflight approval. Values shown in angle brack
 4. **Capture the generated public endpoint and deployed revision.**
 
    ```bash
-   az containerapp show --name <container-app-name> --resource-group <resource-group-name> --query <fqdn-and-revision-query>
+   az containerapp show --name <container-app-name> --resource-group <resource-group-name> --query properties.configuration.ingress.fqdn --output tsv
    ```
 
    Record the FQDN, active revision, immutable image reference, deployment timestamp, and validation result in the deployment record. Do not copy secrets or operator identity details into that record.
