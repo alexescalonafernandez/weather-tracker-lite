@@ -60,6 +60,17 @@ Configure these secrets at the narrowest appropriate GitHub scope. Their values 
 
 No client-secret secret is required. Repository variables may hold non-sensitive, reviewable deployment inputs such as the resource-group name, image repository, ACR login server, and deployment-environment label, once their governance scope is decided.
 
+### Repository variables
+
+Configure these non-secret variables at repository scope for the Publisher.
+
+| Variable name | Used by | Purpose |
+| --- | --- | --- |
+| `AZURE_ACR_NAME` | Publisher | Existing ACR name for Docker login and digest lookup. |
+| `AZURE_ACR_LOGIN_SERVER` | Publisher | Existing ACR login server for the SHA-tagged image reference. |
+
+The Publisher reads these values directly rather than enumerating ACRs in the MVP resource group. This preserves its ACR-scoped `AcrPush` boundary: it can publish to and inspect the configured registry without requiring resource-group discovery permission.
+
 ### Environments, approvals, and concurrency
 
 | Control | Required rule |
@@ -97,7 +108,7 @@ Rollback is a new protected deployment of the last known-good, previously record
 2. Define the protected `main` branch and the dedicated protected deployment environment, including reviewers and deployment concurrency.
 3. Create the two separate Azure application identities and only their target-restricted federated credentials.
 4. Grant `AcrPush` to the publisher on the existing ACR and initial resource-group `Contributor` to the deployer. Confirm the runtime identity remains `AcrPull` only.
-5. Configure the named GitHub secrets in their approved scopes, without adding a client secret.
+5. Configure the named GitHub secrets and the Publisher repository variables `AZURE_ACR_NAME` and `AZURE_ACR_LOGIN_SERVER` in their approved scopes, without adding a client secret.
 6. Implement and validate PR verification: restore, build, test, Docker build, and compilation of `infra/main.bicep` and `infra/workload.bicep`; prove that no Azure login occurs.
 7. Validate protected-main publication with a non-production commit: verify the full-SHA tag, resolved digest, and recorded provenance.
 8. Validate protected deployment with that exact digest: verify the workload-only deployment, deployed revision image, probes, application response, and deployment evidence.
