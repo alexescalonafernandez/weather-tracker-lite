@@ -1,0 +1,87 @@
+name: Publish Container Image
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.metadata.outputs.image_digest }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Sign in to Azure with publisher identity
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_PUBLISHER_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Locate existing registry
+        id: registry
+        shell: bash
+        run: |
+          readonly resource_group='weathertracker-mvp-rg'
+          mapfile -t registries < <(az acr list --resource-group "$resource_group" --query '[].[name,loginServer]' --output tsv)
+
+          if [ "${#registries[@]}" -ne 1 ]; then
+            printf 'Expected exactly one Azure Container Registry in the dedicated MVP resource group.\n' >&2
+            exit 1
+          fi
+
+          IFS=$'\t' read -r registry_name login_server <<< "${registries[0]}"
+          if [ -z "$registry_name" ] || [ -z "$login_server" ]; then
+            printf 'Azure Container Registry discovery returned incomplete data.\n' >&2
+            exit 1
+          fi
+
+          {
+            echo "registry_name=$registry_name"
+            echo "login_server=$login_server"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate Docker to registry
+        shell: bash
+        run: az acr login --name "${{ steps.registry.outputs.registry_name }}"
+
+      - name: Build and push source-tagged image
+        shell: bash
+        run: |
+          image="${{ steps.registry.outputs.login_server }}/weather-tracker-lite:${GITHUB_SHA}"
+          docker build --tag "$image" .
+          docker push "$image"
+
+      - name: Resolve immutable image digest
+        id: metadata
+        shell: bash
+        run: |
+          image="weather-tracker-lite:${GITHUB_SHA}"
+          image_digest="$(az acr repository show --name "${{ steps.registry.outputs.registry_name }}" --image "$image" --query digest --output tsv)"
+
+          if [[ ! "$image_digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            printf 'Registry did not return a valid SHA-256 image digest.\n' >&2
+            exit 1
+          fi
+
+          echo "image_digest=$image_digest" >> "$GITHUB_OUTPUT"
+          {
+            echo "source_sha=${GITHUB_SHA}"
+            echo "image_tag=${GITHUB_SHA}"
+            echo "image_digest=$image_digest"
+          } > image-provenance.txt
+
+      - name: Upload image provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-provenance
+          path: image-provenance.txt
+          if-no-files-found: error
