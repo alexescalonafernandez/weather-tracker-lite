@@ -1,0 +1,42 @@
+name: Pull Request Verification
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore .NET solution
+        run: dotnet restore WeatherTrackerLite.sln
+
+      - name: Test .NET solution
+        run: dotnet test WeatherTrackerLite.sln --configuration Release --no-restore
+
+      - name: Build .NET solution
+        run: dotnet build WeatherTrackerLite.sln --configuration Release --no-restore
+
+      - name: Build Docker image locally
+        run: docker build --tag weather-tracker-lite:pr-verification .
+
+      - name: Compile Bicep templates and parameter files
+        shell: bash
+        run: |
+          output_directory="$RUNNER_TEMP/bicep"
+          mkdir --parents "$output_directory"
+          az bicep build --file infra/main.bicep --outfile "$output_directory/main.json"
+          az bicep build --file infra/workload.bicep --outfile "$output_directory/workload.json"
+          az bicep build-params --file infra/parameters/mvp.example.bicepparam --outfile "$output_directory/mvp.example.parameters.json"
+          az bicep build-params --file infra/parameters/workload.example.bicepparam --outfile "$output_directory/workload.example.parameters.json"
