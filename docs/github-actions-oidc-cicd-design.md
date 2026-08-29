@@ -58,16 +58,18 @@ Configure these secrets at the narrowest appropriate GitHub scope. Their values 
 | `AZURE_TENANT_ID` | Publisher and deployment |
 | `AZURE_SUBSCRIPTION_ID` | Publisher and deployment |
 
-No client-secret secret is required. Repository variables may hold non-sensitive, reviewable deployment inputs such as the resource-group name, image repository, ACR login server, and deployment-environment label, once their governance scope is decided.
+No client-secret secret is required. Repository variables may hold non-sensitive, reviewable deployment inputs such as the resource-group name, image repository, ACR login server, Container App name, and deployment-environment label, once their governance scope is decided.
 
 ### Repository variables
 
-Configure these non-secret variables at repository scope for the Publisher.
+Configure these non-secret variables at repository scope.
 
 | Variable name | Used by | Purpose |
 | --- | --- | --- |
 | `AZURE_ACR_NAME` | Publisher | Existing ACR name for Docker login and digest lookup. |
 | `AZURE_ACR_LOGIN_SERVER` | Publisher | Existing ACR login server for the SHA-tagged image reference. |
+| `AZURE_RESOURCE_GROUP` | Deployment | Existing resource group containing the workload. |
+| `AZURE_CONTAINER_APP_NAME` | Deployment | Existing Container App whose active revision is verified. |
 
 The Publisher reads these values directly rather than enumerating ACRs in the MVP resource group. This preserves its ACR-scoped `AcrPush` boundary: it can publish to and inspect the configured registry without requiring resource-group discovery permission.
 
@@ -78,7 +80,7 @@ The Publisher reads these values directly rather than enumerating ACRs in the MV
 | Protected main | Only changes admitted through the protected `main` branch can invoke publication. |
 | Deployment environment | Use a dedicated protected GitHub Environment with required reviewers; only that environment may run the deployment job. |
 | Environment secrets | Scope deployment-sensitive secrets to the protected deployment environment. Publisher secrets must not be exposed to pull-request jobs. |
-| Concurrency | Use one deployment concurrency group per target environment, with queued deployments rather than cancellation of an active deployment. |
+| Concurrency | Use one deployment concurrency group per target environment with `cancel-in-progress: false`. The active rollout is never cancelled, but GitHub retains at most one pending deployment; a newer invocation replaces an earlier pending one. Operators must re-dispatch a superseded digest after the active rollout completes. |
 | Provenance | Deployment input must be a publisher-recorded digest and its associated source SHA, not a manually typed tag. |
 
 ## Immutable image contract
@@ -98,7 +100,7 @@ The publisher tags the image with the full Git commit SHA and pushes it to the e
 
 The deployment job deploys only `infra/workload.bicep` at the existing dedicated resource-group scope. It must not invoke `infra/main.bicep`, because that entry point creates the foundation resource group and supporting services.
 
-After deployment, verify that the active revision uses the requested digest and that `/health/live`, `/health/ready`, and the application root succeed. The existing runbook notes that the first request can take longer when scale-to-zero activates the application.
+After deployment, verify that the active revision uses the requested digest and that `/health/live`, `/health/ready`, and the application root succeed. To accommodate scale-to-zero, all three checks share one bounded five-minute cold-start deadline: each request runs for at most 10 seconds and failed requests retry after 10 seconds until the shared deadline expires. The existing runbook notes that the first request can take longer when scale-to-zero activates the application.
 
 Rollback is a new protected deployment of the last known-good, previously recorded digest. Do not retag an image, deploy a floating tag, alter the running image manually, disable probes, or broaden permissions to recover. If the revision cannot be made healthy, stop the rollout, preserve non-sensitive evidence, and use the approved manual incident and teardown boundaries where applicable.
 
@@ -108,7 +110,7 @@ Rollback is a new protected deployment of the last known-good, previously record
 2. Define the protected `main` branch and the dedicated protected deployment environment, including reviewers and deployment concurrency.
 3. Create the two separate Azure application identities and only their target-restricted federated credentials.
 4. Grant `AcrPush` to the publisher on the existing ACR and initial resource-group `Contributor` to the deployer. Confirm the runtime identity remains `AcrPull` only.
-5. Configure the named GitHub secrets and the Publisher repository variables `AZURE_ACR_NAME` and `AZURE_ACR_LOGIN_SERVER` in their approved scopes, without adding a client secret.
+5. Configure the named GitHub secrets and the repository variables `AZURE_ACR_NAME`, `AZURE_ACR_LOGIN_SERVER`, `AZURE_RESOURCE_GROUP`, and `AZURE_CONTAINER_APP_NAME` in their approved scopes, without adding a client secret.
 6. Implement and validate PR verification: restore, build, test, Docker build, and compilation of `infra/main.bicep` and `infra/workload.bicep`; prove that no Azure login occurs.
 7. Validate protected-main publication with a non-production commit: verify the full-SHA tag, resolved digest, and recorded provenance.
 8. Validate protected deployment with that exact digest: verify the workload-only deployment, deployed revision image, probes, application response, and deployment evidence.

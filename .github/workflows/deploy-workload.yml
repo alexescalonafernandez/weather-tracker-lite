@@ -1,0 +1,196 @@
+name: Deploy Workload
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_reference:
+        description: Immutable image reference in the form repository@sha256:<digest>
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-workload-rollout
+  cancel-in-progress: false
+
+jobs:
+  validate-input:
+    runs-on: ubuntu-latest
+    outputs:
+      image_reference: ${{ steps.validate.outputs.image_reference }}
+
+    steps:
+      - name: Validate immutable image reference
+        id: validate
+        shell: bash
+        env:
+          IMAGE_REFERENCE: ${{ inputs.image_reference }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$IMAGE_REFERENCE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(\/[a-z0-9]+([._-][a-z0-9]+)*)*@sha256:[a-f0-9]{64}$ ]]; then
+            printf 'image_reference must be a repository followed by a lowercase SHA-256 digest.\n' >&2
+            exit 1
+          fi
+
+          printf 'image_reference=%s\n' "$IMAGE_REFERENCE" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: validate-input
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      image_reference: ${{ steps.provenance.outputs.image_reference }}
+      active_revision: ${{ steps.provenance.outputs.active_revision }}
+      deployment_result: ${{ steps.provenance.outputs.deployment_result }}
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_CONTAINER_APP_NAME: ${{ vars.AZURE_CONTAINER_APP_NAME }}
+      IMAGE_REFERENCE: ${{ needs.validate-input.outputs.image_reference }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AZURE_RESOURCE_GROUP"
+          test -n "$AZURE_CONTAINER_APP_NAME"
+
+      - name: Sign in to Azure with deployer identity
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_DEPLOYER_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate workload template
+        shell: bash
+        run: |
+          set -euo pipefail
+          az deployment group validate \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/workload.bicep \
+            --parameters "imageReference=$IMAGE_REFERENCE" \
+            --only-show-errors \
+            --output none
+
+      - name: Preview workload changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          az deployment group what-if \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/workload.bicep \
+            --parameters "imageReference=$IMAGE_REFERENCE" \
+            --result-format ResourceIdOnly \
+            --only-show-errors \
+            --output none
+
+      - name: Deploy workload template
+        shell: bash
+        run: |
+          set -euo pipefail
+          az deployment group create \
+            --name "workload-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/workload.bicep \
+            --parameters "imageReference=$IMAGE_REFERENCE" \
+            --only-show-errors \
+            --output none
+
+      - name: Verify active revision image
+        id: revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          active_revision="$(az containerapp show \
+            --name "$AZURE_CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.latestRevisionName \
+            --output tsv)"
+          test -n "$active_revision"
+
+          active_image="$(az containerapp revision show \
+            --name "$AZURE_CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$active_revision" \
+            --query "properties.template.containers[?name=='weather-tracker-lite'].image | [0]" \
+            --output tsv)"
+
+          if [[ "$active_image" != */"$IMAGE_REFERENCE" ]] || [[ "${active_image#*@}" != "${IMAGE_REFERENCE#*@}" ]]; then
+            printf 'The active revision does not use the requested immutable image digest.\n' >&2
+            exit 1
+          fi
+
+          printf 'active_revision=%s\n' "$active_revision" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test public endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="$(az containerapp show \
+            --name "$AZURE_CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)"
+          test -n "$endpoint"
+
+          deadline=$((SECONDS + 300))
+          smoke_check() {
+            local path="$1"
+            local remaining timeout
+
+            while (( SECONDS < deadline )); do
+              remaining=$((deadline - SECONDS))
+              timeout=10
+              (( remaining < timeout )) && timeout="$remaining"
+
+              if curl --fail --silent --show-error --max-time "$timeout" --output /dev/null "https://${endpoint}${path}"; then
+                return 0
+              fi
+
+              remaining=$((deadline - SECONDS))
+              (( remaining <= 0 )) && break
+              (( remaining > 10 )) && sleep 10 || sleep "$remaining"
+            done
+
+            printf 'Smoke check did not succeed before the five-minute cold-start deadline.\n' >&2
+            return 1
+          }
+
+          smoke_check /health/live
+          smoke_check /health/ready
+          smoke_check /
+
+      - name: Record deployment provenance
+        id: provenance
+        shell: bash
+        env:
+          ACTIVE_REVISION: ${{ steps.revision.outputs.active_revision }}
+        run: |
+          set -euo pipefail
+          image_digest="${IMAGE_REFERENCE#*@}"
+          {
+            printf 'source_sha=%s\n' "$GITHUB_SHA"
+            printf 'image_reference=%s\n' "$IMAGE_REFERENCE"
+            printf 'image_digest=%s\n' "$image_digest"
+            printf 'active_revision=%s\n' "$ACTIVE_REVISION"
+            printf 'deployment_result=succeeded\n'
+          } > deployment-provenance.txt
+
+          printf 'image_reference=%s\n' "$IMAGE_REFERENCE" >> "$GITHUB_OUTPUT"
+          printf 'active_revision=%s\n' "$ACTIVE_REVISION" >> "$GITHUB_OUTPUT"
+          printf 'deployment_result=succeeded\n' >> "$GITHUB_OUTPUT"
+
+      - name: Upload deployment provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-provenance
+          path: deployment-provenance.txt
+          if-no-files-found: error
