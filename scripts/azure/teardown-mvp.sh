@@ -72,8 +72,23 @@ az group delete --name "$resource_group" --yes --no-wait
 
 deadline=$(( $(date +%s) + timeout_seconds ))
 while [[ "$(normalize_az_boolean "$(az group exists --name "$resource_group")")" == true ]]; do
-  (( $(date +%s) < deadline )) || fail "Deletion did not complete before the ${timeout_seconds}-second deadline"
+  (( $(date +%s) < deadline )) || break
   sleep 10
 done
+
+final_exists="$(normalize_az_boolean "$(az group exists --name "$resource_group")")"
+if [[ "$final_exists" == true ]]; then
+  if provisioning_state="$(az group show --name "$resource_group" --query properties.provisioningState --output tsv 2>/dev/null)"; then
+    provisioning_state="$(normalize_az_boolean "$provisioning_state")"
+    if [[ -n "$provisioning_state" ]]; then
+      if [[ "$provisioning_state" == deleting ]]; then
+        printf '%s\n' "Deletion is still pending for resource group: $resource_group. Do not rerun delete; poll az group exists --name \"$resource_group\" until it returns false." >&2
+        exit 2
+      fi
+      fail "Deletion did not complete before the ${timeout_seconds}-second deadline; resource group still exists with provisioning state: $provisioning_state. Investigate the Azure operation before retrying."
+    fi
+  fi
+  fail "Deletion did not complete before the ${timeout_seconds}-second deadline; resource group still exists and its provisioning state could not be read. Investigate the Azure operation before retrying."
+fi
 
 printf '%s\n' "Deletion verified: resource group no longer exists: $resource_group"
