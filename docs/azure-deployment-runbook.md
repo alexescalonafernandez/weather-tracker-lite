@@ -6,6 +6,8 @@ This runbook defines the **future** build, publish, deployment, and verification
 
 The deployment unit is one ASP.NET Core container listening on port `8080`. Its public endpoint is the generated Container Apps FQDN. Deployment is complete only after image, revision, probes, logs, and smoke checks pass.
 
+For a guarded manual command implementation of this procedure, use [`scripts/azure/`](../scripts/azure/README.md). The scripts do not replace this runbook or the Bicep source of truth.
+
 ## Preflight requirements
 
 | Requirement | Evidence required before mutation |

@@ -437,3 +437,4 @@ FodyWeavers.xsd
 
 # Generated Bicep templates (source files remain under infra/)
 /infra/*.json
+/infra/parameters/*.json
