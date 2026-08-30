@@ -15,6 +15,13 @@ EOF
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"; }
 require_value() { [[ -n "${2:-}" ]] || fail "$1 is required"; }
+normalize_az_boolean() {
+  local value="$1"
+  value="${value#$'\xEF\xBB\xBF'}"
+  value="${value//$'\r'/}"
+  value="${value//$'\n'/}"
+  printf '%s' "${value,,}"
+}
 
 resource_group=''
 confirmation=''
@@ -41,7 +48,7 @@ require_command az
 require_value '--resource-group' "$resource_group"
 [[ "$resource_group" != *$'\n'* && "$resource_group" != *$'\r'* ]] || fail 'Resource group must be a single-line exact name'
 
-exists="$(az group exists --name "$resource_group")"
+exists="$(normalize_az_boolean "$(az group exists --name "$resource_group")")"
 if [[ "$exists" != true ]]; then
   printf '%s\n' "Resource group does not exist: $resource_group"
   exit 0
@@ -64,7 +71,7 @@ printf '%s\n' "Deleting resource group: $resource_group"
 az group delete --name "$resource_group" --yes --no-wait
 
 deadline=$(( $(date +%s) + timeout_seconds ))
-while [[ "$(az group exists --name "$resource_group")" == true ]]; do
+while [[ "$(normalize_az_boolean "$(az group exists --name "$resource_group")")" == true ]]; do
   (( $(date +%s) < deadline )) || fail "Deletion did not complete before the ${timeout_seconds}-second deadline"
   sleep 10
 done
